@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bag Alarm Control</title>
+
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    :root{
+      --bg1:#0b1020;
+      --bg2:#0a2a3a;
+      --card: rgba(255,255,255,.08);
+      --card2: rgba(255,255,255,.06);
+      --stroke: rgba(255,255,255,.12);
+      --text:#eaf2ff;
+      --muted: rgba(234,242,255,.7);
+      --good:#37d67a;
+      --bad:#ff4d4d;
+      --warn:#ffcc00;
+      --shadow: 0 20px 60px rgba(0,0,0,.35);
+      --radius: 18px;
+      --glow: 0 0 24px rgba(79,172,254,.20), 0 0 50px rgba(0,242,254,.12);
+      --ease: cubic-bezier(.2,.9,.2,1);
+    }
+
+    *{ box-sizing: border-box; }
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 700px at 20% 20%, rgba(79, 172, 254, .25), transparent 60%),
+        radial-gradient(900px 600px at 80% 30%, rgba(0, 242, 254, .18), transparent 60%),
+        linear-gradient(135deg, var(--bg1), var(--bg2));
+      padding: 28px;
+      overflow-x: hidden;
+    }
+
+    .bgOrbs{
+      position: fixed;
+      inset: -20vh -20vw;
+      pointer-events: none;
+      filter: blur(18px);
+      opacity: .55;
+      z-index: 0;
+    }
+    .orb{
+      position:absolute;
+      width: 320px; height: 320px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, rgba(79,172,254,.55), rgba(79,172,254,0));
+      animation: floaty 10s var(--ease) infinite;
+      mix-blend-mode: screen;
+    }
+    .orb:nth-child(2){
+      width: 420px; height: 420px;
+      left: 58%;
+      top: 10%;
+      background: radial-gradient(circle at 30% 30%, rgba(0,242,254,.40), rgba(0,242,254,0));
+      animation-duration: 13s;
+      animation-delay: -3s;
+    }
+    .orb:nth-child(3){
+      width: 260px; height: 260px;
+      left: 18%;
+      top: 55%;
+      background: radial-gradient(circle at 30% 30%, rgba(55,214,122,.28), rgba(55,214,122,0));
+      animation-duration: 12s;
+      animation-delay: -6s;
+    }
+    @keyframes floaty{
+      0%   { transform: translate3d(0,0,0) scale(1); }
+      50%  { transform: translate3d(30px,-18px,0) scale(1.06); }
+      100% { transform: translate3d(0,0,0) scale(1); }
+    }
+
+    .wrap{
+      position: relative;
+      z-index: 1;
+      max-width: 820px;
+      margin: 0 auto;
+      animation: pageIn .55s var(--ease) both;
+    }
+    @keyframes pageIn{
+      from{ opacity: 0; transform: translateY(10px); }
+      to{ opacity: 1; transform: translateY(0); }
+    }
+
+    .card{
+      background: color-mix(in srgb, var(--card) 95%, transparent);
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(14px);
+      transition: transform .18s var(--ease), box-shadow .18s var(--ease);
+      animation: cardPop .6s var(--ease) both;
+    }
+    @keyframes cardPop{
+      from{ opacity: 0; transform: translateY(12px) scale(.985); }
+      to{ opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .card:hover{
+      transform: translateY(-2px);
+      box-shadow: 0 28px 80px rgba(0,0,0,.40);
+    }
+
+    .cardHeader{
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid var(--stroke);
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,.06), transparent);
+    }
+
+    .title{ display:flex; flex-direction:column; gap: 2px; }
+    .title h1{ font-size: 18px; margin:0; letter-spacing: .2px; }
+    .title p{ margin:0; color: var(--muted); font-size: 13px; }
+
+    .statusPill{
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--stroke);
+      background: rgba(255,255,255,.06);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot{
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--bad);
+      box-shadow: 0 0 14px rgba(255,77,77,.35);
+      position: relative;
+    }
+    .dot.pulse::after{
+      content:"";
+      position:absolute;
+      inset:-6px;
+      border-radius: 999px;
+      border: 1px solid rgba(55,214,122,.45);
+      animation: pulse 1.25s var(--ease) infinite;
+      opacity: .85;
+    }
+    @keyframes pulse{
+      0%   { transform: scale(.55); opacity: .9; }
+      70%  { transform: scale(1.35); opacity: 0; }
+      100% { transform: scale(1.35); opacity: 0; }
+    }
+
+    .spinner{
+      width: 14px; height: 14px;
+      border-radius: 999px;
+      border: 2px solid rgba(234,242,255,.25);
+      border-top-color: rgba(234,242,255,.85);
+      animation: spin .8s linear infinite;
+      display:none;
+    }
+    .statusPill.connecting .spinner{ display:inline-block; }
+    .statusPill.connecting .dot{ display:none; }
+    @keyframes spin { to{ transform: rotate(360deg); } }
+
+    .content{ padding: 16px 18px 18px; }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 520px){ .grid{ grid-template-columns: 1fr; } }
+
+    .tile{
+      background: var(--card2);
+      border: 1px solid var(--stroke);
+      border-radius: 16px;
+      padding: 14px;
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 12px;
+      transition: transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease);
+      position: relative;
+      overflow: hidden;
+    }
+    .tile:hover{
+      transform: translateY(-2px);
+      background: rgba(255,255,255,.075);
+      border-color: rgba(255,255,255,.18);
+      box-shadow: var(--glow);
+    }
+
+    .tileLeft{ display:flex; flex-direction:column; gap: 2px; min-width: 0; }
+    .tileLeft .label{ font-weight: 650; font-size: 14px; display:flex; align-items:center; gap: 8px; }
+    .tileLeft .desc{ color: var(--muted); font-size: 12.5px; line-height: 1.25; }
+
+    .switch{
+      position: relative;
+      width: 54px;
+      height: 32px;
+      flex: 0 0 auto;
+      user-select:none;
+    }
+    .switch input{ display:none; }
+    .track{
+      position:absolute; inset:0;
+      border-radius: 999px;
+      background: rgba(255,255,255,.14);
+      border: 1px solid var(--stroke);
+      transition: .18s var(--ease);
+      overflow:hidden;
+    }
+    .thumb{
+      position:absolute;
+      top: 4px; left: 4px;
+      width: 24px; height: 24px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.9);
+      box-shadow: 0 8px 18px rgba(0,0,0,.35);
+      transition: .22s var(--ease);
+    }
+    .track::after{
+      content:"";
+      position:absolute;
+      top:-50%;
+      left:-30%;
+      width: 60%;
+      height: 200%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.15), transparent);
+      transform: translateX(-120%) rotate(18deg);
+      transition: transform .5s var(--ease);
+    }
+    .switch input:checked + .track{
+      background: rgba(55,214,122,.22);
+      border-color: rgba(55,214,122,.45);
+    }
+    .switch input:checked + .track .thumb{
+      transform: translateX(22px);
+      background: rgba(55,214,122,.95);
+    }
+    .switch input:checked + .track::after{
+      transform: translateX(260%) rotate(18deg);
+    }
+
+    .actions{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    button{
+      appearance:none;
+      border: 1px solid var(--stroke);
+      background: rgba(255,255,255,.08);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 12px;
+      cursor:pointer;
+      font-weight: 600;
+      transition: transform .16s var(--ease), background .16s var(--ease), border-color .16s var(--ease);
+      position: relative;
+      overflow:hidden;
+    }
+    button:hover{
+      transform: translateY(-2px);
+      background: rgba(255,255,255,.11);
+      border-color: rgba(255,255,255,.18);
+      box-shadow: var(--glow);
+    }
+    button:active{ transform: translateY(0px) scale(.99); }
+
+    button .rip{
+      position:absolute;
+      border-radius: 999px;
+      transform: translate(-50%, -50%);
+      pointer-events:none;
+      opacity: .65;
+      animation: rip .55s var(--ease) forwards;
+      background: rgba(255,255,255,.25);
+    }
+    @keyframes rip{
+      from{ width: 0; height: 0; opacity: .55; }
+      to{ width: 320px; height: 320px; opacity: 0; }
+    }
+
+    .btnPrimary{
+      border-color: rgba(55,214,122,.55);
+      background: rgba(55,214,122,.14);
+    }
+    .btnDanger{
+      border-color: rgba(255,77,77,.55);
+      background: rgba(255,77,77,.12);
+    }
+
+    .hint{ margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+
+    .smallRow{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items:center;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12.5px;
+    }
+    .tag{
+      border: 1px solid var(--stroke);
+      background: rgba(255,255,255,.06);
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+
+    .toasts{
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      display:flex;
+      flex-direction:column;
+      gap: 10px;
+      z-index: 99;
+      max-width: min(360px, calc(100vw - 36px));
+    }
+    .toast{
+      background: rgba(10,16,32,.72);
+      border: 1px solid rgba(255,255,255,.14);
+      backdrop-filter: blur(14px);
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.45);
+      display:flex;
+      gap: 10px;
+      align-items:flex-start;
+      animation: toastIn .28s var(--ease) both;
+    }
+    @keyframes toastIn{
+      from{ opacity:0; transform: translateY(10px) scale(.98); }
+      to{ opacity:1; transform: translateY(0) scale(1); }
+    }
+    .toast .tIcon{
+      width: 22px; height: 22px;
+      border-radius: 8px;
+      display:grid;
+      place-items:center;
+      flex: 0 0 auto;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.14);
+      margin-top: 1px;
+    }
+    .toast .tBody{ min-width: 0; display:flex; flex-direction:column; gap: 2px; }
+    .toast .tTitle{ font-weight: 700; font-size: 13px; line-height: 1.1; }
+    .toast .tMsg{ font-size: 12.5px; color: rgba(234,242,255,.78); word-break: break-word; }
+    .toast.good .tIcon{ border-color: rgba(55,214,122,.38); }
+    .toast.bad  .tIcon{ border-color: rgba(255,77,77,.38); }
+    .toast.warn .tIcon{ border-color: rgba(255,204,0,.35); }
+
+    @media (prefers-reduced-motion: reduce){
+      *{ animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="bgOrbs" aria-hidden="true">
+    <div class="orb" style="left:10%; top:15%;"></div>
+    <div class="orb"></div>
+    <div class="orb"></div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="cardHeader">
+        <div class="title">
+          <h1>🎒 Bag Alarm Control</h1>
+          <p>MQTT via HiveMQ Cloud (WebSocket TLS)</p>
+        </div>
+        <div class="statusPill" id="statusPill">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="dot" id="dot"></span>
+          <span id="connText">Disconnected</span>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="grid">
+          <div class="tile">
+            <div class="tileLeft">
+              <div class="label">🟢 Arm System</div>
+              <div class="desc">Enable / disable all alarms</div>
+            </div>
+            <label class="switch" title="ARM ON/OFF">
+              <input id="togArm" type="checkbox" />
+              <span class="track"><span class="thumb"></span></span>
+            </label>
+          </div>
+
+          <div class="tile">
+            <div class="tileLeft">
+              <div class="label">🧲 Zipper Alarm</div>
+              <div class="desc">Alerts when magnet is not detected</div>
+            </div>
+            <label class="switch" title="ZIPPER ON/OFF">
+              <input id="togZipper" type="checkbox" />
+              <span class="track"><span class="thumb"></span></span>
+            </label>
+          </div>
+
+          <div class="tile">
+            <div class="tileLeft">
+              <div class="label">🎒 Movement Alarm</div>
+              <div class="desc">Alerts when movement is detected</div>
+            </div>
+            <label class="switch" title="MOTION ON/OFF">
+              <input id="togMotion" type="checkbox" />
+              <span class="track"><span class="thumb"></span></span>
+            </label>
+          </div>
+
+          <div class="tile">
+            <div class="tileLeft">
+              <div class="label">🔇 Silent Mode</div>
+              <div class="desc">Telegram only (buzzer OFF)</div>
+            </div>
+            <label class="switch" title="SILENT ON/OFF">
+              <input id="togSilent" type="checkbox" />
+              <span class="track"><span class="thumb"></span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btnPrimary" id="btnConnect">Connect</button>
+          <button id="btnDisconnect">Disconnect</button>
+          <button class="btnDanger" id="btnAllOff">Emergency: Disarm</button>
+        </div>
+
+        <div class="smallRow">
+          <span class="tag">Pub: <b>bagAlarm/cmd/*</b></span>
+        </div>
+
+        <div class="hint">
+          Emergency Disarm sends: ARM OFF + ZIPPER OFF + MOTION OFF + SILENT ON.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    const MQTT_HOST = "1fd0a0a8829f48de9cd09299d2eaae06.s1.eu.hivemq.cloud";
+    const MQTT_WSS_PORT = 8884;
+    const MQTT_USERNAME = "gerdd";
+    const MQTT_PASSWORD = "GERALDsalazar07";
+
+    const TOPIC_ARM    = "bagAlarm/cmd/arm";
+    const TOPIC_ZIPPER = "bagAlarm/cmd/zipper";
+    const TOPIC_MOTION = "bagAlarm/cmd/motion";
+    const TOPIC_SILENT = "bagAlarm/cmd/silent";
+
+    let client = null;
+    const $ = (id) => document.getElementById(id);
+
+    function toast(type, title, msg, ms = 2200){
+      const wrap = $("toasts");
+      const el = document.createElement("div");
+      el.className = `toast ${type}`;
+      const icon = type === "good" ? "✅" : type === "bad" ? "❌" : "⚠️";
+      el.innerHTML = `
+        <div class="tIcon">${icon}</div>
+        <div class="tBody">
+          <div class="tTitle">${title}</div>
+          <div class="tMsg">${msg}</div>
+        </div>
+      `;
+      wrap.appendChild(el);
+      setTimeout(() => {
+        el.style.opacity = "0";
+        el.style.transform = "translateY(8px) scale(.98)";
+        el.style.transition = "opacity .18s ease, transform .18s ease";
+        setTimeout(() => el.remove(), 220);
+      }, ms);
+    }
+
+    function addRipple(e){
+      const btn = e.currentTarget;
+      const r = document.createElement("span");
+      r.className = "rip";
+      const rect = btn.getBoundingClientRect();
+      r.style.left = (e.clientX - rect.left) + "px";
+      r.style.top  = (e.clientY - rect.top) + "px";
+      btn.appendChild(r);
+      setTimeout(() => r.remove(), 560);
+    }
+    document.querySelectorAll("button").forEach(b => b.addEventListener("pointerdown", addRipple));
+
+    function setConnecting(isConnecting){
+      $("statusPill").classList.toggle("connecting", isConnecting);
+    }
+
+    function setConnected(isConnected){
+      setConnecting(false);
+      $("connText").textContent = isConnected ? "Connected" : "Disconnected";
+      const dot = $("dot");
+      dot.style.background = isConnected ? "var(--good)" : "var(--bad)";
+      dot.style.boxShadow  = isConnected
+        ? "0 0 14px rgba(55,214,122,.35)"
+        : "0 0 14px rgba(255,77,77,.35)";
+      dot.classList.toggle("pulse", isConnected);
+    }
+
+    function pub(topic, payload){
+      if(!client || !client.connected){
+        toast("bad", "Not connected", "Connect first before sending commands.");
+        return false;
+      }
+      client.publish(topic, payload, { qos: 0, retain: false });
+      toast("good", "Command sent", `${topic} → ${payload}`, 1400);
+      return true;
+    }
+
+    function connect(){
+      if(client && client.connected){
+        toast("warn", "Already connected", "MQTT is already active.");
+        return;
+      }
+
+      setConnecting(true);
+
+      const url = `wss://${MQTT_HOST}:${MQTT_WSS_PORT}/mqtt`;
+      const clientId = `webctrl_${Math.random().toString(16).slice(2)}`;
+
+      toast("warn", "Connecting…", "Trying to reach HiveMQ broker.", 1600);
+
+      client = mqtt.connect(url, {
+        clientId,
+        username: MQTT_USERNAME,
+        password: MQTT_PASSWORD,
+        clean: true,
+        reconnectPeriod: 2000,
+        connectTimeout: 9000
+      });
+
+      client.on("connect", () => {
+        setConnected(true);
+        toast("good", "Connected", "You can now toggle alarms.");
+
+        // UI defaults only
+        $("togArm").checked = true;
+        $("togZipper").checked = true;
+        $("togMotion").checked = true;
+        $("togSilent").checked = false;
+      });
+
+      client.on("reconnect", () => {
+        setConnecting(true);
+        toast("warn", "Reconnecting…", "Trying again.", 1200);
+      });
+
+      client.on("close", () => {
+        setConnected(false);
+        toast("warn", "Disconnected", "Connection closed.");
+      });
+
+      client.on("error", (err) => {
+        setConnected(false);
+        toast("bad", "MQTT error", err.message);
+      });
+    }
+
+    function disconnect(){
+      if(!client){
+        toast("warn", "No client", "Nothing to disconnect.");
+        return;
+      }
+      client.end(true);
+      client = null;
+      setConnected(false);
+      toast("warn", "Disconnected", "MQTT session ended.", 1600);
+    }
+
+    $("btnConnect").addEventListener("click", connect);
+    $("btnDisconnect").addEventListener("click", disconnect);
+
+    // ✅ Emergency Disarm = global OFF + safe mode
+    $("btnAllOff").addEventListener("click", () => {
+      // publish commands
+      const ok1 = pub(TOPIC_ARM, "OFF");
+      const ok2 = pub(TOPIC_ZIPPER, "OFF");
+      const ok3 = pub(TOPIC_MOTION, "OFF");
+      const ok4 = pub(TOPIC_SILENT, "ON");
+
+      // If not connected, pub() already warned
+      if(!(ok1 && ok2 && ok3 && ok4)) return;
+
+      // reflect on UI
+      $("togArm").checked = false;
+      $("togZipper").checked = false;
+      $("togMotion").checked = false;
+      $("togSilent").checked = true;
+
+      toast("warn", "Emergency Disarm", "ARM OFF • ZIPPER OFF • MOTION OFF • SILENT ON", 2200);
+    });
+
+    $("togArm").addEventListener("change", (e) => pub(TOPIC_ARM, e.target.checked ? "ON" : "OFF"));
+    $("togZipper").addEventListener("change", (e) => pub(TOPIC_ZIPPER, e.target.checked ? "ON" : "OFF"));
+    $("togMotion").addEventListener("change", (e) => pub(TOPIC_MOTION, e.target.checked ? "ON" : "OFF"));
+    $("togSilent").addEventListener("change", (e) => pub(TOPIC_SILENT, e.target.checked ? "ON" : "OFF"));
+
+    window.addEventListener("load", () => {
+      setConnected(false);
+      connect();
+    });
+  </script>
+</body>
+</html>
